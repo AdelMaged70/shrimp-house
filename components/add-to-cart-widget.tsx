@@ -47,6 +47,7 @@ export function AddToCartWidget({ product }: AddToCartWidgetProps) {
             size="icon"
             onClick={decrementQuantity}
             disabled={quantity <= 1}
+            className="cursor-pointer"
           >
             <Minus className="h-4 w-4" />
           </Button>
@@ -57,6 +58,7 @@ export function AddToCartWidget({ product }: AddToCartWidgetProps) {
             variant="outline"
             size="icon"
             onClick={incrementQuantity}
+            className="cursor-pointer"
           >
             <Plus className="h-4 w-4" />
           </Button>

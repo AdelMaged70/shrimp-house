@@ -36,7 +36,6 @@ export default function CheckoutPage() {
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
-    email: '',
     address: '',
     branch: '',
     paymentMethod: 'cash',
@@ -114,7 +113,7 @@ export default function CheckoutPage() {
         selectedBranch.id,
         formData.name,
         formData.phone,
-        formData.email,
+        '',
         formData.address,
         totalPrice,
         orderItems,
@@ -198,7 +197,7 @@ export default function CheckoutPage() {
                             value={formData.name}
                             onChange={handleInputChange}
                             placeholder="أدخل اسمك" 
-                            className="text-primary"
+                            className="text-primary placeholder:opacity-50"
                             required
                           />
                         </div>
@@ -214,23 +213,10 @@ export default function CheckoutPage() {
                             value={formData.phone}
                             onChange={handleInputChange}
                             placeholder="01234567890"
-                            className="text-primary"
+                            className="text-primary placeholder:opacity-50"
                             required
                           />
                         </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="email">البريد الإلكتروني (اختياري)</Label>
-                        <Input
-                          id="email"
-                          name="email"
-                          type="email"
-                          value={formData.email}
-                          onChange={handleInputChange}
-                          placeholder="example@email.com"
-                          className="text-primary"
-                        />
                       </div>
                     </CardContent>
                   </Card>
@@ -251,7 +237,7 @@ export default function CheckoutPage() {
                           onChange={handleInputChange}
                           placeholder="أدخل عنوانك بالتفصيل"
                           rows={3}
-                          className="text-primary"
+                          className="text-primary placeholder:opacity-50"
                           required
                         />
                       </div>
@@ -267,7 +253,7 @@ export default function CheckoutPage() {
                           }
                           required
                         >
-                          <SelectTrigger>
+                          <SelectTrigger className="text-primary data-[placeholder]:opacity-50">
                             <SelectValue placeholder={branchesLoading ? 'جاري تحميل الفروع...' : 'اختر الفرع'} />
                           </SelectTrigger>
                           <SelectContent>
@@ -280,7 +266,7 @@ export default function CheckoutPage() {
                               <div className="p-4 text-sm text-center text-muted-foreground">لا توجد فروع متاحة</div>
                             ) : (
                               branches.map((branch: Branch) => (
-                                <SelectItem key={branch.id} value={branch.id} className="text-primary bg-gray-50">
+                                <SelectItem key={branch.id} value={branch.id} className="bg-red-700 text-yellow-400 focus:bg-red-800 focus:text-yellow-400 data-[highlighted]:bg-red-800 data-[highlighted]:text-yellow-400">
                                   {branch.nameAr}
                                 </SelectItem>
                               ))
@@ -297,7 +283,7 @@ export default function CheckoutPage() {
                           value={formData.notes}
                           onChange={handleInputChange}
                           placeholder="أ�� ملاحظات أو طلبات خاصة"
-                          className="text-primary"
+                          className="text-primary placeholder:opacity-50"
                           rows={3}
                         />
                       </div>

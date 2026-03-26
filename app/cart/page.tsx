@@ -93,7 +93,7 @@ export default function CartPage() {
                               <Button
                                 variant="outline"
                                 size="icon"
-                                className="h-8 w-8"
+                                className="h-8 w-8 cursor-pointer"
                                 onClick={() =>
                                   updateQuantity(item.id, item.quantity - 1)
                                 }
@@ -106,7 +106,7 @@ export default function CartPage() {
                               <Button
                                 variant="outline"
                                 size="icon"
-                                className="h-8 w-8"
+                                className="h-8 w-8 cursor-pointer"
                                 onClick={() =>
                                   updateQuantity(item.id, item.quantity + 1)
                                 }
@@ -123,7 +123,7 @@ export default function CartPage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10 cursor-pointer"
                                 onClick={() => removeItem(item.id)}
                               >
                                 <Trash2 className="h-5 w-5" />

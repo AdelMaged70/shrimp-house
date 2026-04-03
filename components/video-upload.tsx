@@ -3,79 +3,88 @@
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Loader2, Video } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-
-// Setup Supabase Client for frontend direct upload
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export default function VideoUpload() {
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleUpload = async (e: any) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    if (file.size > 100 * 1024 * 1024) {
-      alert('نعتذر، الحد الأقصى لحجم الفيديو هو 100 ميجابايت.');
-      return;
-    }
-
-    if (!file.type.startsWith('video/')) {
-      alert('يرجى اختيار ملف فيديو فقط.');
-      return;
-    }
-
     setLoading(true);
+    setProgress(0);
 
     try {
-      const ext = file.name.split('.').pop();
-      const fileName = `videos/${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
-
-      // 1. Request Signed Upload URL from our secure API
+      // ① طلب Signed URL من الـ API — لا يمر الفيديو على Vercel هنا
       const signRes = await fetch('/api/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'get_signed_url', fileName }),
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+        }),
       });
+
       const signData = await signRes.json();
-      
+
       if (!signRes.ok || signData.error) {
-        throw new Error(signData.error || 'فشل الحصول على تصريح الرفع');
+        alert(signData.error || 'حدث خطأ أثناء التحضير');
+        return;
       }
 
-      // 2. Upload file directly to Supabase Storage utilizing the signed URL and token 
-      // This completely bypasses Vercel's payload limits!
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('reviews-videos')
-        .uploadToSignedUrl(fileName, signData.token, file);
+      const { signedUrl, publicUrl, storagePath } = signData;
 
-      if (uploadError) {
-        throw uploadError;
-      }
+      // ② رفع الفيديو مباشرة من المتصفح إلى Supabase Storage (بدون Vercel)
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
 
-      // 3. Confirm upload and save to Database via API
-      const saveRes = await fetch('/api/upload', {
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const pct = Math.round((event.loaded / event.total) * 100);
+            setProgress(pct);
+          }
+        });
+
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            reject(new Error(`Upload failed: ${xhr.status} ${xhr.responseText}`));
+          }
+        });
+
+        xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
+        xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
+
+        xhr.open('PUT', signedUrl);
+        xhr.setRequestHeader('Content-Type', file.type);
+        xhr.send(file);
+      });
+
+      // ③ إخبار الـ API بحفظ الـ URL في قاعدة البيانات
+      const saveRes = await fetch('/api/videos/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'save_db', fileName }),
+        body: JSON.stringify({ publicUrl, storagePath }),
       });
+
       const saveData = await saveRes.json();
 
       if (!saveRes.ok || saveData.error) {
-        throw new Error(saveData.error || 'حدث خطأ أثناء حفظ التقييم');
+        alert(saveData.error || 'حدث خطأ أثناء الحفظ');
+      } else {
+        alert('تم رفع الفيديو بنجاح! شكراً لك ✅');
+        window.location.reload();
       }
-
-      alert('تم رفع الفيديو بنجاح! شكراً لك ✅');
-      window.location.reload(); // Refresh to show new video
     } catch (err: any) {
       console.error(err);
-      alert(err.message || 'حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى.');
+      alert('حدث خطأ غير متوقع: ' + err.message);
     } finally {
       setLoading(false);
-      // Reset input so the same file could be selected again if needed
+      setProgress(0);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -88,16 +97,16 @@ export default function VideoUpload() {
 
   return (
     <div className="flex flex-col items-center gap-4">
-      <input 
-        type="file" 
-        accept="video/*" 
-        onChange={handleUpload} 
-        className="hidden" 
+      <input
+        type="file"
+        accept="video/*"
+        onChange={handleUpload}
+        className="hidden"
         ref={fileInputRef}
       />
-      
-      <Button 
-        onClick={handleButtonClick} 
+
+      <Button
+        onClick={handleButtonClick}
         disabled={loading}
         size="lg"
         className="gap-2 w-full sm:w-auto font-bold text-lg px-8 py-6 rounded-full shadow-lg hover:shadow-xl transition-all"
@@ -105,7 +114,7 @@ export default function VideoUpload() {
         {loading ? (
           <>
             <Loader2 className="w-6 h-6 animate-spin" />
-            جاري الرفع... (قد يستغرق بعض الوقت)
+            {progress > 0 ? `جاري الرفع... ${progress}%` : 'جاري التحضير...'}
           </>
         ) : (
           <>
@@ -114,7 +123,16 @@ export default function VideoUpload() {
           </>
         )}
       </Button>
-      
+
+      {loading && progress > 0 && (
+        <div className="w-full max-w-xs bg-gray-200 rounded-full h-2">
+          <div
+            className="bg-primary h-2 rounded-full transition-all duration-300"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      )}
+
       <p className="text-sm text-muted-foreground mt-2">
         مسموح برفع الفيديوهات فقط. (الحد الأقصى 100 ميجابايت)
       </p>

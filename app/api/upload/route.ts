@@ -27,78 +27,68 @@ export async function POST(req: NextRequest) {
     // 🚫 Rate limit
     if (!checkRateLimit(ip)) {
       return NextResponse.json(
-        { error: 'Too many uploads, try later' },
+        { error: 'عمليات رفع كثيرة، حاول لاحقاً' },
         { status: 429 }
       );
     }
 
-    const formData = await req.formData();
-    const file = formData.get('file') as File;
+    const payload = await req.json();
 
-    if (!file) {
-      return NextResponse.json({ error: 'No file' }, { status: 400 });
+    // 1. Generate a signed URL for direct upload
+    if (payload.action === 'get_signed_url') {
+      const { fileName } = payload;
+      
+      const { data, error } = await supabase.storage
+        .from('reviews-videos')
+        .createSignedUploadUrl(fileName);
+        
+      if (error) throw error;
+      
+      return NextResponse.json({ ...data }); // returns { token, path, signedUrl }
     }
+    
+    // 2. Save the uploaded file to Database and clean up old videos
+    if (payload.action === 'save_db') {
+      const { fileName } = payload;
+      
+      // 🔗 public URL
+      const { data: publicUrl } = supabase.storage
+        .from('reviews-videos')
+        .getPublicUrl(fileName);
 
-    // 📏 Validation (size)
-    if (file.size > 100 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: 'File too large (max 20MB)' },
-        { status: 400 }
-      );
-    }
+      // 💾 Save in DB
+      await supabase.from('reviews').insert({
+        video_url: publicUrl.publicUrl,
+      });
 
-    // 🎥 Validation (type)
-    if (!file.type.startsWith('video/')) {
-      return NextResponse.json(
-        { error: 'Only video allowed' },
-        { status: 400 }
-      );
-    }
+      // 📥 Get all videos
+      const { data: videos } = await supabase
+        .from('reviews')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    const fileName = `videos/${Date.now()}-${file.name}`;
+      // 🧹 delete extra (keep only 3)
+      if (videos && videos.length > 3) {
+        const extra = videos.slice(3);
 
-    // ⬆️ Upload
-    const { data, error } = await supabase.storage
-      .from('reviews-videos')
-      .upload(fileName, file);
+        for (const vid of extra) {
+          const path = vid.video_url.split('/').slice(-2).join('/');
 
-    if (error) throw error;
+          await supabase.storage
+            .from('reviews-videos')
+            .remove([path]);
 
-    // 🔗 public URL
-    const { data: publicUrl } = supabase.storage
-      .from('reviews-videos')
-      .getPublicUrl(fileName);
-
-    // 💾 Save in DB
-    await supabase.from('reviews').insert({
-      video_url: publicUrl.publicUrl,
-    });
-
-    // 📥 Get all videos
-    const { data: videos } = await supabase
-      .from('reviews')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    // 🧹 delete extra (keep only 3)
-    if (videos && videos.length > 3) {
-      const extra = videos.slice(3);
-
-      for (const vid of extra) {
-        const path = vid.video_url.split('/').slice(-2).join('/');
-
-        await supabase.storage
-          .from('reviews-videos')
-          .remove([path]);
-
-        await supabase.from('reviews').delete().eq('id', vid.id);
+          await supabase.from('reviews').delete().eq('id', vid.id);
+        }
       }
+
+      return NextResponse.json({ success: true });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ error: 'Action not valid' }, { status: 400 });
 
   } catch (err) {
     console.error(err);
-    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: 'خطأ في الخادم' }, { status: 500 });
   }
 }

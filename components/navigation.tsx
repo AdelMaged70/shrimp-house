@@ -15,6 +15,7 @@ export function Navigation() {
     { href: '/', label: 'الرئيسية', labelEn: 'Home' },
     { href: '/categories', label: 'المنيو', labelEn: 'Menu' },
     { href: '/cart', label: 'السلة', labelEn: 'Cart' },
+    { href: '/reviews', label: 'التقييمات', labelEn: 'Reviews' },
   ]
 
   return (

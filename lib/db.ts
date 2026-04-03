@@ -7,6 +7,12 @@
 import { createClient } from '@supabase/supabase-js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+// reiview
+    export interface Review {
+    id: string;
+    video_url: string;
+    created_at: string;
+    }
 
 export interface DBCategory {
     id: string

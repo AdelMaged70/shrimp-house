@@ -9,7 +9,7 @@ export default function Home() {
     <div className="min-h-screen flex flex-col">
       <Navigation />
       <main className="flex-1">
-        <HeroCarousel />
+        {/* <HeroCarousel /> */}
         <CategoriesSection />
         <BestSellersSection />
       </main>

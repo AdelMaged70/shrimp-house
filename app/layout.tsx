@@ -10,9 +10,9 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Shrimp House - أفضل مطعم مأكولات بحرية في مصر',
-  description: 'شريمب هاوس - مطعم متخصص في الأطعمة البحرية والقشريات مع فروع في دسوق والإسكندرية والمزيد',
-  generator: 'v0.app',
+  title: 'Shrimp House',
+  description: 'شريمب هاوس مطعم متخصص فى المأكولات البحرية',
+  generator: 'Mat3ami',
   icons: {
     icon: [
       {

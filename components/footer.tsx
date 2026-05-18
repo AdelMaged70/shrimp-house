@@ -15,10 +15,7 @@ export function Footer() {
                 <p className="text-sm opacity-80">شريمب هاوس</p>
               </div>
             </div>
-            <p className="text-sm leading-relaxed opacity-90">
-              أفضل مطعم مأكولات بحرية في مصر. نقدم أطباق بحرية طازجة ولذيذة مع
-              خدمة ممتازة.
-            </p>
+            {/* ممكن تضيف هنا سلوجن  */}
           </div>
 
           {/* Quick Links */}

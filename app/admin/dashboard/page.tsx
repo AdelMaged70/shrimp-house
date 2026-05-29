@@ -5,6 +5,14 @@ import { useRouter } from 'next/navigation'
 import { getBranchOrders, updateOrderStatus, deleteOrder, getBranchStatus, updateBranchStatus } from '@/app/actions/admin-actions'
 import { supabaseClient } from '@/lib/supabase-admin'
 
+// ────── NOTIFICATION TYPES ──────
+interface PendingNotification {
+  orderId: string
+  customerName: string
+  total: number
+  time: string
+}
+
 interface Cashier {
   id: string
   email: string
@@ -70,8 +78,14 @@ export default function AdminDashboardPage() {
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
   const [realtimeStatus, setRealtimeStatus] = useState<'CONNECTING' | 'SUBSCRIBED' | 'ERROR' | 'OFF'>('OFF')
   
+  // ────── NEW: Unacknowledged orders state ──────
+  const [unacknowledgedOrders, setUnacknowledgedOrders] = useState<PendingNotification[]>([])
+
   const pollRef = useRef<NodeJS.Timeout | null>(null)
   const branchRef = useRef<string>('')
+  const soundLoopRef = useRef<NodeJS.Timeout | null>(null)
+  const titleFlashRef = useRef<NodeJS.Timeout | null>(null)
+  const originalTitleRef = useRef('Shrimp House - Dashboard')
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type })
@@ -81,24 +95,140 @@ export default function AdminDashboardPage() {
   const playNotificationSound = useCallback(() => {
     if (!notificationsEnabled) return
     try {
-      // Create a fresh Audio instance each time - avoids autoplay policy issues
       const audio = new Audio(NOTIFY_SOUND_URL)
       audio.volume = 1
       const playPromise = audio.play()
       if (playPromise !== undefined) {
-        playPromise.catch(() => {
-          // Silently ignore - browser blocked autoplay
-        })
+        playPromise.catch(() => {})
       }
     } catch {
       // Silently ignore errors
     }
   }, [notificationsEnabled])
 
+  // ────── NEW: Start repeating sound loop until acknowledged ──────
+  const startSoundLoop = useCallback(() => {
+    // Clear any existing loop
+    if (soundLoopRef.current) clearInterval(soundLoopRef.current)
+    // Play immediately
+    playNotificationSound()
+    // Then repeat every 5 seconds
+    soundLoopRef.current = setInterval(() => {
+      playNotificationSound()
+    }, 5000)
+  }, [playNotificationSound])
+
+  const stopSoundLoop = useCallback(() => {
+    if (soundLoopRef.current) {
+      clearInterval(soundLoopRef.current)
+      soundLoopRef.current = null
+    }
+  }, [])
+
+  // ────── NEW: Title flashing for browser tab ──────
+  const startTitleFlash = useCallback(() => {
+    if (titleFlashRef.current) return
+    let isOriginal = true
+    titleFlashRef.current = setInterval(() => {
+      document.title = isOriginal ? '🔔 طلب جديد!' : originalTitleRef.current
+      isOriginal = !isOriginal
+    }, 1000)
+  }, [])
+
+  const stopTitleFlash = useCallback(() => {
+    if (titleFlashRef.current) {
+      clearInterval(titleFlashRef.current)
+      titleFlashRef.current = null
+    }
+    document.title = originalTitleRef.current
+  }, [])
+
+  // ────── NEW: Send native browser notification ──────
+  const sendBrowserNotification = useCallback(async (customerName: string, total: number) => {
+    if (!('Notification' in window)) return
+    
+    // Auto-request if permission is default
+    if (Notification.permission === 'default') {
+      await Notification.requestPermission()
+    }
+    
+    if (Notification.permission !== 'granted') return
+    
+    try {
+      const title = '🦐 طلب جديد - Shrimp House'
+      const options: any = {
+        body: `${customerName} - ${total.toFixed(0)} ج.م`,
+        icon: '/images/logo.png',
+        badge: '/images/logo.png',
+        tag: 'new-order',
+        requireInteraction: true, // stays until user clicks
+        vibrate: [200, 100, 200],
+        silent: false,
+        actions: [
+          { action: 'view', title: '👁️ عرض الطلب' }
+        ]
+      }
+
+      // 1. Try via Service Worker (supports actions/buttons)
+      if ('serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.getRegistration()
+        if (reg) {
+          reg.showNotification(title, options)
+          return
+        }
+      }
+
+      // 2. Fallback to standard constructor
+      const notif = new Notification(title, options)
+      notif.onclick = () => {
+        window.focus()
+        notif.close()
+      }
+    } catch (e) {
+      console.error('Notification error:', e)
+    }
+  }, [])
+
+  // ────── NEW: Acknowledge all pending notifications ──────
+  const acknowledgeOrders = useCallback(() => {
+    setUnacknowledgedOrders([])
+    stopSoundLoop()
+    stopTitleFlash()
+  }, [stopSoundLoop, stopTitleFlash])
+
+  // ────── NEW: Handle incoming new order notification ──────
+  const handleNewOrderNotification = useCallback((orderData: { id: string; customer_name?: string; total_price?: number; created_at?: string }) => {
+    const notification: PendingNotification = {
+      orderId: orderData.id || 'unknown',
+      customerName: orderData.customer_name || 'عميل',
+      total: Number(orderData.total_price) || 0,
+      time: orderData.created_at || new Date().toISOString(),
+    }
+    
+    setUnacknowledgedOrders(prev => {
+      // Avoid duplicates
+      if (prev.some(n => n.orderId === notification.orderId)) return prev
+      return [...prev, notification]
+    })
+
+    // Start repeating sound
+    startSoundLoop()
+    // Flash title
+    startTitleFlash()
+    // Native browser notification
+    sendBrowserNotification(notification.customerName, notification.total)
+    // Toast
+    showToast('🔔 طلب جديد وارد الآن!', 'success')
+  }, [startSoundLoop, startTitleFlash, sendBrowserNotification])
+
   const testNotification = (e: React.MouseEvent) => {
     e.stopPropagation()
-    playNotificationSound()
-    showToast('هذه رسالة تجريبية - الإشعارات تعمل!', 'success')
+    handleNewOrderNotification({
+      id: 'test-' + Date.now(),
+      customer_name: 'تجربة',
+      total_price: 150,
+      created_at: new Date().toISOString(),
+    })
   }
 
   const fetchStatus = useCallback(async (branchId: string) => {
@@ -151,6 +281,30 @@ export default function AdminDashboardPage() {
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [fetchOrders, router, fetchStatus])
 
+  // ────── NEW: Register Service Worker for better notifications ──────
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(err => {
+        console.error('Service Worker registration failed:', err)
+      })
+    }
+  }, [])
+
+  // ────── NEW: Request browser notification permission when notifications enabled ──────
+  useEffect(() => {
+    if (notificationsEnabled && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+  }, [notificationsEnabled])
+
+  // ────── NEW: Cleanup sound loop and title flash on unmount ──────
+  useEffect(() => {
+    return () => {
+      stopSoundLoop()
+      stopTitleFlash()
+    }
+  }, [stopSoundLoop, stopTitleFlash])
+
   // Realtime Subscription with improved logging
   useEffect(() => {
     if (!notificationsEnabled || !cashier) {
@@ -169,7 +323,6 @@ export default function AdminDashboardPage() {
           event: 'INSERT',
           schema: 'public',
           table: 'orders',
-          // removing specific filter here to make it more robust
         },
         (payload) => {
           console.log('REALTIME: Received insert event!', payload)
@@ -178,8 +331,8 @@ export default function AdminDashboardPage() {
           if (payload.new && payload.new.branch_id === cashier.branchId) {
             console.log('MATCH: New order for this branch!')
             fetchOrders(cashier.branchId, true)
-            playNotificationSound()
-            showToast('🔔 طلب جديد وارد الآن!', 'success')
+            // Use the new comprehensive notification handler
+            handleNewOrderNotification(payload.new as { id: string; customer_name?: string; total_price?: number; created_at?: string })
           } else {
             console.log('IGNORE: Order is for a different branch:', payload.new?.branch_id)
           }
@@ -191,7 +344,6 @@ export default function AdminDashboardPage() {
           setRealtimeStatus('SUBSCRIBED')
         } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           setRealtimeStatus('ERROR')
-          // console.error('Realtime connection error:', status, err)
         }
       })
 
@@ -199,7 +351,7 @@ export default function AdminDashboardPage() {
       console.log('Cleaning up realtime channel')
       supabaseClient.removeChannel(channel)
     }
-  }, [notificationsEnabled, cashier, fetchOrders, playNotificationSound])
+  }, [notificationsEnabled, cashier, fetchOrders, handleNewOrderNotification])
 
   const toggleNotifications = async () => {
     const newValue = !notificationsEnabled
@@ -929,9 +1081,192 @@ export default function AdminDashboardPage() {
           0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
           50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(16,185,129,0); }
         }
+
+        /* ────── NEW ORDER ALERT BANNER ────── */
+        .new-order-banner {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          z-index: 999;
+          background: linear-gradient(135deg, #dc2626, #b91c1c);
+          border-bottom: 3px solid #fbbf24;
+          padding: 0;
+          animation: bannerSlideDown 0.4s ease;
+          box-shadow: 0 8px 32px rgba(220,38,38,0.4);
+        }
+
+        @keyframes bannerSlideDown {
+          from { transform: translateY(-100%); }
+          to { transform: translateY(0); }
+        }
+
+        @keyframes bannerPulse {
+          0%, 100% { background: linear-gradient(135deg, #dc2626, #b91c1c); }
+          50% { background: linear-gradient(135deg, #ef4444, #dc2626); }
+        }
+
+        .new-order-banner-inner {
+          max-width: 1400px;
+          margin: 0 auto;
+          padding: 0.75rem 1.5rem;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+          animation: bannerPulse 2s ease-in-out infinite;
+        }
+
+        .banner-left {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          flex: 1;
+          min-width: 0;
+        }
+
+        .banner-bell {
+          font-size: 1.8rem;
+          animation: bellShake 0.5s ease-in-out infinite;
+          flex-shrink: 0;
+        }
+
+        @keyframes bellShake {
+          0%, 100% { transform: rotate(0deg); }
+          25% { transform: rotate(15deg); }
+          75% { transform: rotate(-15deg); }
+        }
+
+        .banner-text {
+          color: #fff;
+          font-weight: 800;
+          font-size: 1.1rem;
+          line-height: 1.4;
+        }
+
+        .banner-text-sub {
+          font-size: 0.82rem;
+          font-weight: 500;
+          color: rgba(255,255,255,0.85);
+          margin-top: 0.15rem;
+        }
+
+        .banner-count {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 28px;
+          height: 28px;
+          background: #fbbf24;
+          color: #7c2d12;
+          font-weight: 900;
+          font-size: 0.9rem;
+          border-radius: 50%;
+          flex-shrink: 0;
+        }
+
+        .banner-ack-btn {
+          padding: 0.6rem 1.5rem;
+          background: #fbbf24;
+          color: #7c2d12;
+          border: none;
+          border-radius: 10px;
+          font-family: 'Tajawal', sans-serif;
+          font-size: 0.95rem;
+          font-weight: 800;
+          cursor: pointer;
+          transition: all 0.2s;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+        .banner-ack-btn:hover {
+          background: #f59e0b;
+          transform: scale(1.05);
+        }
+
+        .banner-orders-list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+          margin-top: 0.5rem;
+        }
+
+        .banner-order-chip {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+          padding: 0.3rem 0.6rem;
+          background: rgba(255,255,255,0.15);
+          border-radius: 8px;
+          font-size: 0.78rem;
+          color: #fff;
+          font-weight: 600;
+          backdrop-filter: blur(4px);
+        }
+
+        .banner-order-chip .chip-total {
+          color: #fde68a;
+          font-weight: 800;
+        }
+
+        /* ────── NOTIFICATION BADGE ────── */
+        .notify-badge {
+          position: absolute;
+          top: -6px;
+          right: -6px;
+          min-width: 18px;
+          height: 18px;
+          background: #ef4444;
+          color: #fff;
+          font-size: 0.65rem;
+          font-weight: 900;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 2px solid #080d16;
+          animation: badgePop 0.3s ease;
+        }
+
+        @keyframes badgePop {
+          0% { transform: scale(0); }
+          50% { transform: scale(1.3); }
+          100% { transform: scale(1); }
+        }
+
+        .notify-toggle {
+          position: relative;
+        }
       `}</style>
 
       <div className="dash-page">
+        {/* ── NEW ORDER ALERT BANNER ── */}
+        {unacknowledgedOrders.length > 0 && (
+          <div className="new-order-banner">
+            <div className="new-order-banner-inner">
+              <div className="banner-left">
+                <div className="banner-bell">🔔</div>
+                <div>
+                  <div className="banner-text">
+                    <span className="banner-count">{unacknowledgedOrders.length}</span>
+                    {' '}
+                    {unacknowledgedOrders.length === 1 ? 'طلب جديد وارد!' : 'طلبات جديدة واردة!'}
+                  </div>
+                  <div className="banner-orders-list">
+                    {unacknowledgedOrders.map(n => (
+                      <div key={n.orderId} className="banner-order-chip">
+                        👤 {n.customerName} — <span className="chip-total">{n.total.toFixed(0)} ج</span> — {formatTime(n.time)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <button className="banner-ack-btn" onClick={acknowledgeOrders}>
+                ✅ تم المراجعة
+              </button>
+            </div>
+          </div>
+        )}
         {/* ── HEADER ── */}
         <header className="dash-header">
           <div className="dash-header-inner">
@@ -958,6 +1293,9 @@ export default function AdminDashboardPage() {
                 onClick={toggleNotifications}
                 title={notificationsEnabled ? 'إيقاف التنبيهات' : 'تفعيل التنبيهات'}
               >
+                {unacknowledgedOrders.length > 0 && (
+                  <div className="notify-badge">{unacknowledgedOrders.length}</div>
+                )}
                 <div className="toggle-label">🔔 الإشعارات</div>
                 
                 {notificationsEnabled && (

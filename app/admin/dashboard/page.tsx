@@ -144,48 +144,80 @@ export default function AdminDashboardPage() {
   }, [])
 
   // ────── NEW: Send native browser notification ──────
-  const sendBrowserNotification = useCallback(async (customerName: string, total: number) => {
-    if (!('Notification' in window)) return
+  const sendBrowserNotification = useCallback(async (customerName: string, total: number, count: number) => {
+    console.log('🔔 Triggering notification:', { customerName, total, count });
     
-    // Auto-request if permission is default
+    if (!('Notification' in window)) return;
+    
     if (Notification.permission === 'default') {
-      await Notification.requestPermission()
+      await Notification.requestPermission();
     }
     
-    if (Notification.permission !== 'granted') return
-    
+    if (Notification.permission !== 'granted') {
+      console.warn('Notification permission not granted');
+      return;
+    }
+
     try {
-      const title = '🦐 طلب جديد - Shrimp House'
+      // ────── AGGREGATION & RESET LOGIC ──────
+      // Use a fixed tag so the OS knows to replace the old alert with the new one
+      const notificationTag = 'shrimp-house-alert';
+      
+      const title = count > 1 ? `🔔 ولديك ${count} طلبات جديدة!` : '🦐 طلب جديد - شريمب هاوس';
+      const body = count > 1 
+        ? `هناك ${count} طلبات تنتظر مراجعتك الآن`
+        : `${customerName} - ${total.toFixed(0)} ج.م`;
+
       const options: any = {
-        body: `${customerName} - ${total.toFixed(0)} ج.م`,
-        icon: '/images/logo.png',
+        body,
+        icon: '/images/logo.png', // Verified path
         badge: '/images/logo.png',
-        tag: 'new-order',
-        requireInteraction: true, // stays until user clicks
+        tag: notificationTag,
+        requireInteraction: true,
         vibrate: [200, 100, 200],
         silent: false,
+        renotify: true, // Forces sound/vibration even with same tag
         actions: [
-          { action: 'view', title: '👁️ عرض الطلب' }
+          { action: 'view', title: '👁️ عرض الطلبات' }
         ]
-      }
+      };
 
-      // 1. Try via Service Worker (supports actions/buttons)
+      // We prefer the standard Notification for dashboard focus 
+      // but we will close any existing one with the same tag if possible via SW 
+      // or just trust the 'renotify: true' behavior.
+      
+      let notif: Notification | null = null;
+
+      // Try SW first for actions support
       if ('serviceWorker' in navigator) {
-        const reg = await navigator.serviceWorker.getRegistration()
+        const reg = await navigator.serviceWorker.getRegistration();
         if (reg) {
-          reg.showNotification(title, options)
-          return
+          // Explicitly close old ones to ensure the new one "pops"
+          const old = await reg.getNotifications({ tag: notificationTag });
+          old.forEach(n => n.close());
+          
+          await reg.showNotification(title, options);
+          
+          // Auto-close after 10 seconds
+          setTimeout(async () => {
+            const current = await reg.getNotifications({ tag: notificationTag });
+            current.forEach(n => n.close());
+          }, 10000);
+          return;
         }
       }
 
-      // 2. Fallback to standard constructor
-      const notif = new Notification(title, options)
+      // Fallback to standard
+      notif = new Notification(title, options);
       notif.onclick = () => {
-        window.focus()
-        notif.close()
-      }
+        window.focus();
+        notif?.close();
+      };
+      
+      // Auto-close after 10 seconds
+      setTimeout(() => notif?.close(), 10000);
     } catch (e) {
-      console.error('Notification error:', e)
+      console.error('Notification error detail:', e);
     }
   }, [])
 
@@ -208,15 +240,18 @@ export default function AdminDashboardPage() {
     setUnacknowledgedOrders(prev => {
       // Avoid duplicates
       if (prev.some(n => n.orderId === notification.orderId)) return prev
-      return [...prev, notification]
+      const newList = [...prev, notification]
+      
+      // Native browser notification with the new count
+      sendBrowserNotification(notification.customerName, notification.total, newList.length)
+      
+      return newList
     })
 
     // Start repeating sound
     startSoundLoop()
     // Flash title
     startTitleFlash()
-    // Native browser notification
-    sendBrowserNotification(notification.customerName, notification.total)
     // Toast
     showToast('🔔 طلب جديد وارد الآن!', 'success')
   }, [startSoundLoop, startTitleFlash, sendBrowserNotification])
@@ -344,6 +379,11 @@ export default function AdminDashboardPage() {
           setRealtimeStatus('SUBSCRIBED')
         } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           setRealtimeStatus('ERROR')
+          console.error('Realtime connection issue detected:', status)
+          // Delayed reload for Chrome as requested
+          setTimeout(() => {
+            window.location.reload()
+          }, 3000)
         }
       })
 

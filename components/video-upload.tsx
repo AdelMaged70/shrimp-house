@@ -37,7 +37,7 @@ export default function VideoUpload() {
 
       const { signedUrl, publicUrl, storagePath } = signData;
 
-      // ② رفع الفيديو مباشرة من المتصفح إلى Supabase Storage (بدون Vercel)
+      // ② رفع الفيديو مباشرة من المتصفح إلى R2 Storage (بدون Vercel)
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
 
@@ -59,7 +59,9 @@ export default function VideoUpload() {
         xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
         xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
 
+        // في R2/S3 Pre-signed URLs، نستخدم PUT
         xhr.open('PUT', signedUrl);
+        // ملاحظة: تأكد من أن الـ Content-Type يطابق ما تم استخدامه عند إنشاء الـ Signed URL إذا كان مطلوباً
         xhr.setRequestHeader('Content-Type', file.type);
         xhr.send(file);
       });
@@ -70,6 +72,7 @@ export default function VideoUpload() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ publicUrl, storagePath }),
       });
+
 
       const saveData = await saveRes.json();
 

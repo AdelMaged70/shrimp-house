@@ -1,22 +1,10 @@
 // app/api/upload/route.ts
-// هذا الـ API لا يستقبل الفيديو — فقط يولّد Signed URL من Supabase
-// الفيديو يُرفع مباشرة من المتصفح إلى Supabase Storage
+// هذا الـ API لا يستقبل الفيديو — فقط يولّد Signed URL من R2
+// الفيديو يُرفع مباشرة من المتصفح إلى R2 Storage
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from '@/lib/rate-limit';
-
-function getSupabase() {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key =
-        process.env.SUPABASE_SERVICE_ROLE_KEY ||
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!url || !key) {
-        throw new Error('Missing Supabase environment variables');
-    }
-    return createClient(url, key);
-}
+import { getSignedUrl } from '@/lib/r2-storage';
 
 export async function POST(req: NextRequest) {
     try {
@@ -56,29 +44,30 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const supabase = getSupabase();
         const storagePath = `videos/${Date.now()}-${fileName}`;
 
-        // 🔑 إنشاء Signed Upload URL — الفيديو سيُرفع مباشرة من المتصفح
-        const { data, error } = await supabase.storage
-            .from('reviews-videos')
-            .createSignedUploadUrl(storagePath);
-
-        if (error || !data) {
-            console.error('Signed URL error:', error);
-            return NextResponse.json({ error: 'Failed to create upload URL' }, { status: 500 });
-        }
+        // 🔑 إنشاء Signed Upload URL لمحرك R2
+        const signedUrl = await getSignedUrl('PUT', storagePath, fileType);
 
         // 🔗 Public URL (ستُحفظ في DB بعد اكتمال الرفع)
-        const { data: publicUrlData } = supabase.storage
-            .from('reviews-videos')
-            .getPublicUrl(storagePath);
+        // إذا كان الرابط هو r2.dev، غالباً لا يحتاج لاسم البرميل في المسار
+        const publicUrlBase = process.env.R2_PUBLIC_URL || '';
+        let publicUrl = '';
+
+        if (publicUrlBase.includes('r2.dev')) {
+            publicUrl = `${publicUrlBase}/${storagePath}`;
+        } else {
+            const bucketName = process.env.R2_BUCKET;
+            publicUrl = `${publicUrlBase || `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`}/${bucketName}/${storagePath}`;
+        }
+
+
+
 
         return NextResponse.json({
-            signedUrl: data.signedUrl,
-            token: data.token,
+            signedUrl,
             storagePath,
-            publicUrl: publicUrlData.publicUrl,
+            publicUrl,
         });
 
     } catch (err) {

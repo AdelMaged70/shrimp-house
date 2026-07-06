@@ -22,7 +22,7 @@ export default function AdminLoginPage() {
       if (result.error) {
         setError(result.error)
       } else if (result.success && result.cashier) {
-        sessionStorage.setItem('cashier', JSON.stringify(result.cashier))
+        localStorage.setItem('cashier', JSON.stringify(result.cashier))
         router.push('/admin/dashboard')
       }
     } catch {

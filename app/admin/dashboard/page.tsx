@@ -298,7 +298,7 @@ export default function AdminDashboardPage() {
   }, [])
 
   useEffect(() => {
-    const stored = sessionStorage.getItem('cashier')
+    const stored = localStorage.getItem('cashier')
     if (!stored) { router.push('/admin/login'); return }
     const c = JSON.parse(stored) as Cashier
     setCashier(c)
@@ -324,6 +324,49 @@ export default function AdminDashboardPage() {
       })
     }
   }, [])
+
+  // ────── NEW: Listen for Service Worker messages and Tab Focus to acknowledge orders ──────
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'NOTIFICATION_CLICKED') {
+        acknowledgeOrders()
+      }
+    }
+
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible' || document.hasFocus()) {
+        acknowledgeOrders()
+      }
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleMessage)
+    }
+
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleFocus)
+
+    // Handle initial state if page is focused
+    if (document.visibilityState === 'visible' || document.hasFocus()) {
+      const timer = setTimeout(handleFocus, 500)
+      return () => {
+        clearTimeout(timer)
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.removeEventListener('message', handleMessage)
+        }
+        window.removeEventListener('focus', handleFocus)
+        document.removeEventListener('visibilitychange', handleFocus)
+      }
+    }
+
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleMessage)
+      }
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleFocus)
+    }
+  }, [acknowledgeOrders])
 
   // ────── NEW: Request browser notification permission when notifications enabled ──────
   useEffect(() => {
@@ -441,7 +484,7 @@ export default function AdminDashboardPage() {
   }
 
   const handleLogout = () => {
-    sessionStorage.removeItem('cashier')
+    localStorage.removeItem('cashier')
     router.push('/admin/login')
   }
 

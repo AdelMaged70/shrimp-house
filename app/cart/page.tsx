@@ -94,9 +94,11 @@ export default function CartPage() {
                                 variant="outline"
                                 size="icon"
                                 className="h-8 w-8 cursor-pointer"
-                                onClick={() =>
-                                  updateQuantity(item.id, item.quantity - 1)
-                                }
+                                onClick={() => {
+                                  if (item.quantity > 1) {
+                                    updateQuantity(item.id, item.quantity - 1)
+                                  }
+                                }}
                               >
                                 <Minus className="h-4 w-4" />
                               </Button>

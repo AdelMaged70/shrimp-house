@@ -160,6 +160,50 @@ export async function createOrder(
   notes?: string
 ) {
   try {
+    // Security Fix: Fetch product prices directly from DB
+    const productIds = (items || [])
+      .map(item => String(item.productId || (item as any).id || (item as any).product_id))
+      .filter(id => id && id !== 'unknown' && id !== 'null' && id !== 'undefined')
+
+    const dbProductMap = new Map<string, { price: number; name_ar?: string; name?: string }>()
+
+    if (productIds.length > 0) {
+      const { data: dbProducts } = await supabaseAdmin
+        .from('products')
+        .select('id, price, name_ar, name')
+        .in('id', productIds)
+
+      if (dbProducts) {
+        dbProducts.forEach((p: any) => {
+          dbProductMap.set(String(p.id), {
+            price: Number(p.price) || 0,
+            name_ar: p.name_ar,
+            name: p.name
+          })
+        })
+      }
+    }
+
+    let calculatedTotalPrice = 0
+    const validatedItems = items.map(item => {
+      const rawId = item.productId || (item as any).id || (item as any).product_id
+      const finalProductId = (rawId && rawId !== 'null' && rawId !== 'undefined') ? String(rawId) : 'unknown'
+      const dbProduct = dbProductMap.get(finalProductId)
+      const unitPrice = dbProduct ? dbProduct.price : (Number(item.price) || 0)
+      const quantity = Number(item.quantity) || 1
+
+      calculatedTotalPrice += unitPrice * quantity
+
+      return {
+        product_id: finalProductId,
+        product_name: dbProduct?.name_ar || dbProduct?.name || item.productName || (item as any).name || (item as any).nameAr || 'منتج',
+        quantity: quantity,
+        price: unitPrice
+      }
+    })
+
+    const finalTotalPrice = calculatedTotalPrice > 0 ? calculatedTotalPrice : Number(totalPrice)
+
     // Create order
     const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
@@ -169,7 +213,7 @@ export async function createOrder(
         customer_phone: customerPhone,
         customer_email: customerEmail,
         customer_address: customerAddress,
-        total_price: totalPrice,
+        total_price: finalTotalPrice,
         notes: notes || '',
         status: 'pending'
       })
@@ -179,12 +223,9 @@ export async function createOrder(
     if (orderError) throw orderError
 
     // Create order items
-    const orderItems = items.map(item => ({
+    const orderItems = validatedItems.map(item => ({
       order_id: order.id,
-      product_name: item.productName,
-      product_id: item.productId,
-      quantity: item.quantity,
-      price: item.price
+      ...item
     }))
 
     const { error: itemsError } = await supabaseAdmin

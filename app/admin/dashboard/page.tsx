@@ -287,6 +287,13 @@ export default function AdminDashboardPage() {
 
   const fetchOrders = useCallback(async (branchId: string, silent = false) => {
     if (!silent) setIsLoading(true)
+    try {
+      // Sync any recently completed Paymob payments automatically
+      await fetch('/api/paymob/sync-status').catch(() => {})
+    } catch {
+      // Silently ignore sync errors
+    }
+
     const result = await getBranchOrders(branchId)
     if (result.success) {
       setOrders(result.orders as Order[])
@@ -383,6 +390,11 @@ export default function AdminDashboardPage() {
     }
   }, [stopSoundLoop, stopTitleFlash])
 
+  const ordersRef = useRef<Order[]>([])
+  useEffect(() => {
+    ordersRef.current = orders
+  }, [orders])
+
   // Realtime Subscription with improved logging
   useEffect(() => {
     if (!notificationsEnabled || !cashier) {
@@ -398,21 +410,39 @@ export default function AdminDashboardPage() {
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*',
           schema: 'public',
           table: 'orders',
         },
         (payload) => {
-          console.log('REALTIME: Received insert event!', payload)
+          console.log('REALTIME: Received postgres event!', payload.eventType, payload)
           
           // Verify it's for this branch
-          if (payload.new && payload.new.branch_id === cashier.branchId) {
-            console.log('MATCH: New order for this branch!')
+          if (payload.new && (payload.new as any).branch_id === cashier.branchId) {
+            const newOrder = payload.new as any
+            const isPending = newOrder.status === 'pending'
+
+            if (isPending) {
+              // Trigger notification:
+              // 1. If it's a new INSERT order that is pending
+              // 2. OR it is an UPDATE and the order was not pending in our active dashboard state
+              const previouslyPending = ordersRef.current.some(o => o.id === newOrder.id && o.status === 'pending')
+              
+              if (!previouslyPending) {
+                console.log('MATCH: New active order alert triggered!')
+                fetchOrders(cashier.branchId, true)
+                handleNewOrderNotification({
+                  id: newOrder.id,
+                  customer_name: newOrder.customer_name,
+                  total_price: newOrder.total_price,
+                  created_at: newOrder.created_at
+                })
+                return
+              }
+            }
+            
+            // Otherwise, silently refresh to update state
             fetchOrders(cashier.branchId, true)
-            // Use the new comprehensive notification handler
-            handleNewOrderNotification(payload.new as { id: string; customer_name?: string; total_price?: number; created_at?: string })
-          } else {
-            console.log('IGNORE: Order is for a different branch:', payload.new?.branch_id)
           }
         }
       )

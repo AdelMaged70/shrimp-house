@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import { CartProvider } from '@/contexts/cart-context'
+import { AuthProvider } from '@/contexts/auth-context'
 import { ToasterWrapper } from '@/components/toaster-wrapper'
 import { DbInitializer } from '@/components/db-initializer'
 
@@ -40,12 +41,14 @@ export default function RootLayout({
   return (
     <html lang="ar" dir="rtl">
       <body className="font-sans antialiased">
-        <CartProvider>
-          <DbInitializer />
-          {children}
-          <ToasterWrapper />
-          <Analytics />
-        </CartProvider>
+        <AuthProvider>
+          <CartProvider>
+            <DbInitializer />
+            {children}
+            <ToasterWrapper />
+            <Analytics />
+          </CartProvider>
+        </AuthProvider>
       </body>
     </html>
   )
